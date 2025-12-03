@@ -48,81 +48,159 @@ class FFNLayer:
     def __init__(self, input ,hidden, fun, dfun):
         self.input = input
         self.hidden = hidden
-        self.weights = np.ones((hidden, input))
-        print("weights: ", self.weights.shape)
-        self.bias = np.ones((hidden, 1))
-        print("bias: ", self.bias.shape)
+        # self.weights = np.ones((hidden, input))
+        self.weights = (np.random.rand(hidden, input) - 0.5) * 2/np.sqrt(input)
+        
+        self.bias = np.zeros((hidden, 1))
         self.values = np.zeros((1,hidden))
-        print("values: ", self.values.shape)
+        self.preactivation = np.zeros((1,hidden))
         self.fun = fun
         self.dfun = dfun
 
     def forward(self, I):
-        print("I: ", I.shape)
         self.input = I.reshape((I.shape[0],1))
-        print("input: ", self.input.shape)
-        print("weights: ", self.weights.shape)
-        self.values = self.fun(self.weights @ self.input + self.bias)
-        print("values: ", self.values.shape)
+        self.preactivation = self.weights @ self.input + self.bias
+        self.values = self.fun(self.preactivation)
         return self.values
 
     def backward(self, loss, learningRate):
-        loss = self.dfun(loss)
-        print(loss.shape)
-        dL_dW = loss @ self.input.T
-        dL_dB = loss
-        dL_dX = self.weights.T @ loss
-
-        print(f"dL_dW: {dL_dW}")
-        print(f"dL_dB: {dL_dB}")
-        print(self.input.T)
-        print(f"dL_dX: {dL_dX}")
+        dL_dF = loss * self.dfun(self.preactivation)
+        dL_dW = dL_dF @ self.input.T
+        dL_dB = dL_dF
+        dL_dX = self.weights.T @ dL_dF
+        
+        # print(f"dL_dW: {dL_dW}")
+        # print(f"dL_dB: {dL_dB}")
+        
+        
         self.weights -= learningRate * dL_dW
         self.bias -= learningRate * dL_dB
         
+        
         return dL_dX
-    
-def relu(x):
-    # if x < 0:
-    #     x = x * 0
-    return x
+  
+# activation functions  
+def relu(x : np.ndarray):
+    return np.maximum(0, x)
 
-def drelu(x):
-    # if x > 0:
-    #     return x / x #1
-    # else:
-    #     return 0
-    return x
+def drelu(x : np.ndarray):
+    return np.where(x > 0, 1.00, 0.00)
 
+def sigmoid(x : np.ndarray):
+    return 1 / (1 + np.exp(-x))
+def dsigmoid(x : np.ndarray):
+    s = sigmoid(x)
+    return s * (1 - s)
 
-def run(inp, Y):
-    print("f0")
-    f0 = FFNLayer(inp.shape[0], 4, relu, drelu)
-    print("f1")
-    f1 = FFNLayer(4, 2, relu, drelu)
+def softmax(x : np.ndarray):
+    e_x = np.exp(x - np.max(x))
+    return e_x / e_x.sum(axis=0)
+def dsoftmax(x : np.ndarray):
+    s = softmax(x)
+    return s * (1 - s)
 
-    print("forward0")
+# error functions
+def mse(y_true : np.ndarray, y_pred : np.ndarray):
+    return np.mean((y_true - y_pred)**2)
+
+def dmse(y_true : np.ndarray, y_pred : np.ndarray):
+    return 2 * (y_pred - y_true) / y_true.size
+
+def cross_entropy(y_true : np.ndarray, y_pred : np.ndarray):
+    return -np.sum(y_true * np.log(y_pred + 1e-9))
+
+def dcross_entropy(y_true : np.ndarray, y_pred : np.ndarray):
+    return -(y_true / (y_pred + 1e-9))
+
+hid = 50
+learningRate = 0.001
+f0 = FFNLayer(28*28, hid, relu, drelu)
+f1 = FFNLayer(hid, hid, relu, drelu)
+f2 = FFNLayer(hid, 10, sigmoid, dsigmoid)
+
+def train(inp, Y):
+    global f0, f1, f2
+
     h0 = f0.forward(inp)
-    print("forward1")
-    out = f1.forward(h0)
+    h1 = f1.forward(h0)
+    out = f2.forward(h1)
 
-
-    print(f"out: {out}")
-
-
-    # loss = (sum(out - expected)) ** 2
-    # print(f"loss: {loss}")
     Y = Y.reshape((out.shape[0], 1))
-
-    dloss = 2*(out - Y)
+    
+    # print(f"Output: {out.T}, Target: {Y.T}")
+    # Mean Squared Error Loss
+    # loss = np.sum((out - Y)**2)
+    # dloss = 2*(out - Y)
+    
+    # Cross Entropy Loss
+    # loss = cross_entropy(Y, out)
+    # dloss = dcross_entropy(Y, out)
+    loss = mse(Y, out)
+    dloss = dmse(Y, out)
+    
+    
+    # print(f"dloss: {dloss.T}")
 
     dloss = dloss.reshape((dloss.shape[0], 1))
+    lam2 = f2.backward(dloss, learningRate)
+    lam1 = f1.backward(lam2, learningRate)
+    f0.backward(lam1, learningRate)
+    return loss
+    
 
-    lam1 = f1.backward(dloss, 0.1)
-    lam0 = f0.backward(lam1, 0.1)
+# open data mnist digits (train-image.idx3-ubyte, train-labels.idx1-ubyte)
+import idx2numpy
+import matplotlib.pyplot as plt
+
+trainData = idx2numpy.convert_from_file('data/train-images.idx3-ubyte')
+trainLabels = idx2numpy.convert_from_file('data/train-labels.idx1-ubyte')
+testData = idx2numpy.convert_from_file('data/t10k-images.idx3-ubyte')
+testLabels = idx2numpy.convert_from_file('data/t10k-labels.idx1-ubyte')
+
+print(f"Data shape: {trainData.shape}, Labels shape: {trainLabels.shape}")
+
+# print one with matplotlib
+
+# plt.imshow(trainData[0], cmap='gray')
+# plt.title(f"Label: {trainLabels[0]}")
+# plt.show()
+
+
+#train for 5 epochs
+for epoch in range(1):
+    
+    for i in range(len(trainData)):
+        
+        inp = trainData[i] / 255.0
+        inp = inp.reshape((1, 28*28)).T
+        
+        
+        Y = np.zeros((10, 1))
+        Y[trainLabels[i]] = 1.0
+        
+        loss = train(inp, Y)
+        
+        print(f"Epoch {epoch+1}, Sample {i+1} trained. Loss: {loss}")
+        # print(f"Epoch {epoch+1}, Sample {i+1} trained. Loss: {loss}", end='\r')
+        
+    print(f"Epoch {epoch+1} completed.")
     
 
 
-i = np.array([2,1,2])
-e = np.array([2,2])
-run(i,e)
+# test on first 10 images
+for i in range(10):
+    inp = testData[i].reshape((28*28, 1)) / 255.0
+    out = f2.forward(f1.forward(f0.forward(inp)))
+    pred = np.argmax(out)
+    # print(f"Image {i}, True Label: {testLabels[i]}, Predicted: {pred}, Output: {out.T}")
+    print(f"Image {i}, True Label: {testLabels[i]}, Predicted: {pred}")
+    
+    
+# save weights
+
+np.save('models/f0_weights.npy', f0.weights)
+np.save('models/f0_bias.npy', f0.bias)
+np.save('models/f1_weights.npy', f1.weights)
+np.save('models/f1_bias.npy', f1.bias)
+np.save('models/f2_weights.npy', f2.weights)
+np.save('models/f2_bias.npy', f2.bias)
