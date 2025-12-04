@@ -1,45 +1,3 @@
-'''
-X = [x0 x1 x2]
-
-W = [w00 w01 w02]
-    [w10 w11 w12]
-    [w20 w21 w22]
-    [w30 w31 w32]
-
-x0*w00 + x1*w01 + x2*w02 = f00
-x0*w10 + x1*w11 + x2*w12 = f01
-x0*w20 + x1*w21 + x2*w22 = f02
-x0*w30 + x1*w31 + x2*w32 = f03
-
-F0 = W * X
-H0 = o(F0)
-
-Q = [q00 q01 q02 q03]
-    [q10 q11 q12 q13]
-
-h00 * q00 + h01 * q01 + h02 * q02 + h03 * q03 = f10
-h00 * q10 + h01 * q11 + h02 * q12 + h03 * q13 = f11
-
-F1 = Q * H0
-H1 = o(F1)
-
-L = H1 - y**2
-
-dL/dH = 2(H - y)
-dH/dF = o(F)'
-
-dF/qij = h0j
-
-dF/dh0j = qij
-
-dh0j/df0j = o(f0j)'
-
-df0j/wij = xj
-
-df0j/xj
-
-
-'''
 import numpy as np
 
 class FFNLayer:
@@ -91,6 +49,7 @@ class CNNLayer:
         self.fun = fun
         self.dfun = dfun
         
+        self.preactivation = np.zeros((num_filters, input_shape[1] - filter_size + 1, input_shape[2] - filter_size + 1))
         self.filters = np.random.randn(num_filters, input_shape[0], filter_size, filter_size) * 0.1
         self.biases = np.zeros((num_filters, 1))
         
@@ -110,9 +69,9 @@ class CNNLayer:
                     
                     region = self.input[:, i:i+self.filter_size, j:j+self.filter_size]
                     
-                    self.output[n, i, j] = np.sum(region * self.filters[n]) + self.biases[n]
+                    self.preactivation[n, i, j] = np.sum(region * self.filters[n]) + self.biases[n]
         
-        self.output = self.fun(self.output)
+        self.output = self.fun(self.preactivation)
         
         return self.output
 
@@ -142,9 +101,19 @@ class CNNLayer:
             for i in range(0, self.filter_size):
                 for j in range(0, self.filter_size):
                     
-                    for h in range(dL_dF.shape[1]):
-                        for w in range(dL_dF.shape[2]):
-                            dL_dX[:, i + h, j + w] += self.filters[n, :, i, j] * dL_dF[n, h, w]
+                    if False:
+                        for h in range(dL_dF.shape[1]):
+                            for w in range(dL_dF.shape[2]):
+                                dL_dX[:, i + h, j + w] += self.filters[n, :, i, j] * dL_dF[n, h, w]
+                    else:
+                        region = dL_dF[n, :, :]
+                        s = self.filters[n, :, i, j]
+                        s = s.reshape((s.shape[0],1,1))
+                        s = s * region
+                        
+                        
+                        dL_dX[:, i:i + region.shape[0], j:j + region.shape[1]] += s
+                    
                             
         # Update weights and biases
         self.filters -= learningRate * dL_dW
@@ -275,9 +244,9 @@ for i in range(10):
     
 # save weights
 
-np.save('models/f0_weights.npy', f0.weights)
-np.save('models/f0_bias.npy', f0.bias)
-np.save('models/f1_weights.npy', f1.weights)
-np.save('models/f1_bias.npy', f1.bias)
-np.save('models/f2_weights.npy', f2.weights)
-np.save('models/f2_bias.npy', f2.bias)
+# np.save('models/f0_weights.npy', f0.weights)
+# np.save('models/f0_bias.npy', f0.bias)
+# np.save('models/f1_weights.npy', f1.weights)
+# np.save('models/f1_bias.npy', f1.bias)
+# np.save('models/f2_weights.npy', f2.weights)
+# np.save('models/f2_bias.npy', f2.bias)
