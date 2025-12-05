@@ -76,7 +76,7 @@ class CNNLayer:
         return self.output
 
     def backward(self, loss, learningRate):
-        dL_dF = loss * self.dfun(self.output)
+        dL_dF = loss * self.dfun(self.preactivation)
         # Initialize gradients
         dL_dW = np.zeros_like(self.filters)
         dL_dB = np.zeros_like(self.biases)
@@ -98,21 +98,30 @@ class CNNLayer:
             dL_dB[n] = np.sum(dL_dF[n])
             
         for n in range(self.num_filters):
-            for i in range(0, self.filter_size):
-                for j in range(0, self.filter_size):
+            
+            if True:
+                for i in range(0, self.filter_size):
+                    for j in range(0, self.filter_size):
                     
-                    if False:
-                        for h in range(dL_dF.shape[1]):
-                            for w in range(dL_dF.shape[2]):
-                                dL_dX[:, i + h, j + w] += self.filters[n, :, i, j] * dL_dF[n, h, w]
-                    else:
-                        region = dL_dF[n, :, :]
-                        s = self.filters[n, :, i, j]
-                        s = s.reshape((s.shape[0],1,1))
-                        s = s * region
+                        if False:
+                            for h in range(dL_dF.shape[1]):
+                                for w in range(dL_dF.shape[2]):
+                                    dL_dX[:, i + h, j + w] += self.filters[n, :, i, j] * dL_dF[n, h, w]
+                        else:
+                            region = dL_dF[n, :, :]
+                            s = self.filters[n, :, i, j]
+                            s = s.reshape((s.shape[0],1,1))
+                            s = s * region
                         
                         
-                        dL_dX[:, i:i + region.shape[0], j:j + region.shape[1]] += s
+                            dL_dX[:, i:i + region.shape[0], j:j + region.shape[1]] += s
+            else:
+                
+                # fast convolution for dL_dX
+                filter_rotated = np.flip(self.filters[n], axis=(1,2))
+                for c in range(self.input_shape[0]):
+                    dL_dX[c] += self.convolve2d(dL_dF[n], filter_rotated[c])
+                
                     
                             
         # Update weights and biases
@@ -135,12 +144,28 @@ def dsigmoid(x : np.ndarray):
     s = sigmoid(x)
     return s * (1 - s)
 
-def softmax(x : np.ndarray):
-    e_x = np.exp(x - np.max(x))
-    return e_x / e_x.sum(axis=0)
-def dsoftmax(x : np.ndarray):
-    s = softmax(x)
-    return s * (1 - s)
+def tanh(x):
+    return np.tanh(x)
+
+def dtanh(x):
+    # La derivada es 1 - tanh(x)^2
+    # Si ya tienes la salida (out = tanh(x)), puedes usar: 1 - out**2
+    return 1 - np.tanh(x)**2
+
+def stanh(x):
+    return 2 * np.tanh(x / 2)
+
+def dstanh(x):    
+    return 2 * (1 - np.tanh(x / 2)**2)
+
+
+def lecun_tanh(x):
+    return 1.7159 * np.tanh((2/3) * x)
+
+def dlecun_tanh(x):
+    # Derivada usando la preactivación x
+    return 1.14393 * (1 - np.tanh((2/3) * x)**2)
+
 
 # error functions
 def mse(y_true : np.ndarray, y_pred : np.ndarray):
@@ -155,18 +180,28 @@ def cross_entropy(y_true : np.ndarray, y_pred : np.ndarray):
 def dcross_entropy(y_true : np.ndarray, y_pred : np.ndarray):
     return -(y_true / (y_pred + 1e-9))
 
-learningRate = 0.001
-f0 = CNNLayer(input_shape=(1, 28, 28), num_filters=8, filter_size=3, stride=1, padding=0, fun=relu, dfun=drelu)
-f1 = CNNLayer(input_shape=(8, 26, 26), num_filters=1, filter_size=3, stride=1, padding=0, fun=relu, dfun=drelu)
-f2 = FFNLayer(input=1*24*24, hidden=10, fun=relu, dfun=drelu)
+# f2 = CNNLayer(input_shape=(10, 20, 20), num_filters=15, filter_size=5, stride=1, padding=0, fun=stanh, dfun=dstanh)
+
+
+learningRate = 0.01
+f0 = CNNLayer(input_shape=(1, 28, 28), num_filters=5, filter_size=5, stride=1, padding=0, fun=stanh, dfun=dstanh)
+#28 - 5 + 1 = 24
+f1 = CNNLayer(input_shape=(5, 24, 24), num_filters=8, filter_size=5, stride=1, padding=0, fun=stanh, dfun=dstanh)
+f3 = CNNLayer(input_shape=(8, 20, 20), num_filters=15, filter_size=3, stride=1, padding=0, fun=stanh, dfun=dstanh)
+f4 = FFNLayer(input=15*18*18, hidden=10, fun=lecun_tanh, dfun=dlecun_tanh)
+f5 = FFNLayer(input=10, hidden=10, fun=lecun_tanh, dfun=dlecun_tanh)
 
 def train(inp, Y):
-    global f0, f1
+    global f0, f1, f2, f3, f4, f5, learningRate
 
     h0 = f0.forward(inp)
     h1 = f1.forward(h0)
-    h1_flat = h1.reshape((h1.shape[0]*h1.shape[1]*h1.shape[2], 1))
-    out = f2.forward(h1_flat)
+    # h2 = f2.forward(h1)
+    # h3 = f3.forward(h2)
+    h3 = f3.forward(h1)
+    h3_flat = h3.reshape((h3.shape[0]*h3.shape[1]*h3.shape[2], 1))
+    h4 = f4.forward(h3_flat)
+    out = f5.forward(h4)
 
     Y = Y.reshape((out.shape[0], 1))
     
@@ -181,15 +216,25 @@ def train(inp, Y):
     loss = mse(Y, out)
     dloss = dmse(Y, out)
     
+    # if loss < 0.09:
+    #     learningRate = 0.4
+    
     
     # print(f"dloss: {dloss.T}")
 
     dloss = dloss.reshape((dloss.shape[0], 1))
-    lam2 = f2.backward(dloss, learningRate)
+    lam5 = f5.backward(dloss, learningRate)
     
-    lam2c = lam2.reshape((f1.outputShape[0], f1.outputShape[1], f1.outputShape[2]))
+    lam4 = f4.backward(lam5, learningRate)
     
-    lam1 = f1.backward(lam2c, learningRate)
+    lam4c = lam4.reshape((f3.outputShape[0], f3.outputShape[1], f3.outputShape[2]))
+    
+    lam3 = f3.backward(lam4c, learningRate)
+    
+    # lam2 = f2.backward(lam3, learningRate)
+    # lam1 = f1.backward(lam2, learningRate)
+    
+    lam1 = f1.backward(lam3, learningRate)
     f0.backward(lam1, learningRate)
     return loss
     
@@ -215,14 +260,14 @@ print(f"Data shape: {trainData.shape}, Labels shape: {trainLabels.shape}")
 #train for 5 epochs
 for epoch in range(1):
     
-    for i in range(len(trainData)):
+    for i in range(len(trainData[:1000])):
         
         inp = trainData[i] / 255.0
         inp = inp.reshape((1, 28, 28))
         
         
         Y = np.zeros((10, 1))
-        Y[trainLabels[i]] = 1.0
+        Y[trainLabels[i]] = 1
         
         loss = train(inp, Y)
         
@@ -236,7 +281,15 @@ for epoch in range(1):
 # test on first 10 images
 for i in range(10):
     inp = testData[i].reshape((1, 28, 28)) / 255.0
-    out = f2.forward(f1.forward(f0.forward(inp)))
+    
+    h5 = f0.forward(inp)
+    h4 = f1.forward(h5)
+    # h3 = f2.forward(h4)
+    # h2 = f3.forward(h3)
+    h2 = f3.forward(h4)
+    h2_flat = h2.reshape((h2.shape[0]*h2.shape[1]*h2.shape[2], 1))
+    h1 = f4.forward(h2_flat)
+    out = f5.forward(h1)
     pred = np.argmax(out)
     # print(f"Image {i}, True Label: {testLabels[i]}, Predicted: {pred}, Output: {out.T}")
     print(f"Image {i}, True Label: {testLabels[i]}, Predicted: {pred}")
